@@ -7,7 +7,7 @@ import re
 st.set_page_config(page_title="Colruyt Ticket naar Excel", layout="centered")
 st.title("🧾 Colruyt kasticket naar Excel")
 
-uploaded_file = st.file_uploader("Upload een Colruyt-kasticket (PDF)", type=["pdf"])
+uploaded_files = st.file_uploader("Upload één of meerdere Colruyt-kastickets (PDF)", type=["pdf"], accept_multiple_files=True)
 
 
 def parse_ticket(text):
@@ -38,23 +38,29 @@ def parse_ticket(text):
     return pd.DataFrame(data)
 
 
-if uploaded_file:
-    with pdfplumber.open(uploaded_file) as pdf:
-        all_text = ""
-        for page in pdf.pages:
-            text = page.extract_text()
-            if text:
-                all_text += text + "\n"
+if uploaded_files:
+    all_dataframes = []
 
-    df = parse_ticket(all_text)
+    for uploaded_file in uploaded_files:
+        with pdfplumber.open(uploaded_file) as pdf:
+            all_text = ""
+            for page in pdf.pages:
+                text = page.extract_text()
+                if text:
+                    all_text += text + "\n"
 
-    if not df.empty:
-        st.success("✅ Gegevens herkend! Bekijk of alles klopt.")
-        st.dataframe(df)
+        df = parse_ticket(all_text)
+        if not df.empty:
+            all_dataframes.append(df)
+
+    if all_dataframes:
+        final_df = pd.concat(all_dataframes, ignore_index=True)
+        st.success("✅ Gegevens uit alle tickets herkend! Bekijk of alles klopt.")
+        st.dataframe(final_df)
 
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df.to_excel(writer, index=False, sheet_name="Aankopen")
+            final_df.to_excel(writer, index=False, sheet_name="Aankopen")
         st.download_button(
             label="💾 Download Excel-bestand",
             data=output.getvalue(),
@@ -62,4 +68,4 @@ if uploaded_file:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
     else:
-        st.warning("⚠️ Geen producten gevonden in dit ticket.")
+        st.warning("⚠️ Geen producten gevonden in de geüploade tickets.")
