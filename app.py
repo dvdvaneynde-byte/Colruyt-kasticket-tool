@@ -48,7 +48,12 @@ def parse_ticket(text):
 
 if uploaded_file:
     with pdfplumber.open(uploaded_file) as pdf:
-        all_text = "\n".join(page.extract_text() for page in pdf if page.extract_text())
+        all_text = ""
+for page in pdf.pages:
+    text = page.extract_text()
+    if text:
+        all_text += text + "\n"
+
         df = parse_ticket(all_text)
 
     if not df.empty:
