@@ -26,22 +26,27 @@ def parse_ticket(text):
             winkel = line.strip()
 
     # Zoek producten
-    pattern = re.compile(r"(.+?)\s{2,}(\d+(?:[,.]\d+)?)\s+(\d+(?:[,.]\d+))")
+    pattern = re.compile(r"(.+?)\s+(\d+(?:[.,]\d+)?)\s+(\d+(?:[.,]\d+)?)$")
     for line in lines:
         match = pattern.search(line)
         if match:
             product = match.group(1).strip()
-            aantal = match.group(2).replace(",", ".")
-            totaal = match.group(3).replace(",", ".")
-            eenheidsprijs = round(float(totaal) / float(aantal), 2) if float(aantal) != 0 else 0
-            data.append({
-                "Datum": date,
-                "Winkel": winkel,
-                "Product": product,
-                "Aantal": float(aantal),
-                "Eenheidsprijs": eenheidsprijs,
-                "Totaalprijs": float(totaal)
-            })
+            aantal = match.group(2).replace(',', '.')
+            totaal = match.group(3).replace(',', '.')
+            try:
+                aantal_f = float(aantal)
+                totaal_f = float(totaal)
+                eenheidsprijs = round(totaal_f / aantal_f, 2) if aantal_f != 0 else 0
+                data.append({
+                    "Datum": date,
+                    "Winkel": winkel,
+                    "Product": product,
+                    "Aantal": aantal_f,
+                    "Eenheidsprijs": eenheidsprijs,
+                    "Totaalprijs": totaal_f
+                })
+            except:
+                continue
 
     return pd.DataFrame(data)
 
@@ -49,12 +54,12 @@ def parse_ticket(text):
 if uploaded_file:
     with pdfplumber.open(uploaded_file) as pdf:
         all_text = ""
-for page in pdf.pages:
-    text = page.extract_text()
-    if text:
-        all_text += text + "\n"
+        for page in pdf.pages:
+            text = page.extract_text()
+            if text:
+                all_text += text + "\n"
 
-        df = parse_ticket(all_text)
+    df = parse_ticket(all_text)
 
     if not df.empty:
         st.success("✅ Gegevens herkend! Bekijk of alles klopt.")
