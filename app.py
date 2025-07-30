@@ -24,8 +24,8 @@ def parse_ticket(text):
             eenheidsprijs = match.group(3).replace(",", ".")
             totaal = match.group(4).replace(",", ".")
             try:
-                eenheidsprijs_f = float(eenheidsprijs)
-                totaal_f = float(totaal)
+                eenheidsprijs_f = f"€{float(eenheidsprijs):.2f}"
+                totaal_f = f"€{float(totaal):.2f}"
                 data.append({
                     "Benaming": benaming,
                     "Hoeveelheid": hoeveelheid,
