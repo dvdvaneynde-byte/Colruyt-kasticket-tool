@@ -128,10 +128,17 @@ if uploaded_files:
             'GewichtKg': 'sum',
             'AantalStuks': 'sum'
         }).reset_index()
-        pivot_maand = pivot_maand.sort_values(by='TotaalNum')
+
         pivot_maand['Totaal aantal (stuks)'] = pivot_maand['AantalStuks'].astype(int)
         pivot_maand['Totaal gewicht (kg)'] = pivot_maand['GewichtKg'].apply(lambda x: f"{x:.2f} kg")
-        pivot_maand['Totaalprijs'] = pivot_maand['TotaalNum'].apply(lambda x: f"€{x:.2f}")
+        pivot_maand['TotaalprijsNum'] = pivot_maand['TotaalNum']
+        pivot_maand['Totaalprijs'] = pivot_maand['TotaalprijsNum'].apply(lambda x: f"€{x:.2f}")
+
+        # Sorteren per maand (chronologisch) én per prijs binnen de maand (laag naar hoog)
+        pivot_maand['Maand_sort'] = pd.to_datetime(pivot_maand['Maand'], format='%Y-%m')
+        pivot_maand = pivot_maand.sort_values(by=['Maand_sort', 'TotaalprijsNum'])
+
+        # Kolommen opschonen
         pivot_maand = pivot_maand[['Maand', 'Benaming', 'Totaal aantal (stuks)', 'Totaal gewicht (kg)', 'Totaalprijs']]
 
         # Samenvatting per jaar gesorteerd
