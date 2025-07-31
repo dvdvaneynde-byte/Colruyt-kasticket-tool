@@ -8,22 +8,16 @@ from datetime import datetime
 st.set_page_config(page_title="Colruyt Ticket naar Excel", layout="centered")
 st.title("🧾 Colruyt kasticket naar Excel")
 
-uploaded_files = st.file_uploader(
-    "Upload één of meerdere Colruyt-kastickets (PDF)",
-    type=["pdf"],
-    accept_multiple_files=True,
-)
+uploaded_files = st.file_uploader("Upload één of meerdere Colruyt-kastickets (PDF)", type=["pdf"], accept_multiple_files=True)
 
-# Debug optie aan/uit
-show_debug = st.checkbox("Debug: Niet-matchende regels tonen", value=False)
 
 def parse_ticket(text, filename):
     lines = text.split('\n')
     data = []
-    aankoopdatum = None
+    aankoopdatum = ""
 
-    # Zoek aankoopdatum in eerste 20 regels, fallback naar hele tekst
-    for line in lines[:20]:
+    # Zoek aankoopdatum
+    for line in lines:
         match = re.search(r"(\d{2}/\d{2}/\d{4})", line)
         if match:
             try:
@@ -31,18 +25,9 @@ def parse_ticket(text, filename):
                 break
             except:
                 continue
-    if aankoopdatum is None:
-        for line in lines:
-            match = re.search(r"(\d{2}/\d{2}/\d{4})", line)
-            if match:
-                try:
-                    aankoopdatum = datetime.strptime(match.group(1), "%d/%m/%Y").date()
-                    break
-                except:
-                    continue
 
+    # Zoek producten met exacte benaming en hoeveelheid uit ticket
     pattern = re.compile(r"(.+?)\s+(\S+)\s+(\d+[.,]?\d*)\s+(\d+[.,]?\d*)$")
-
     for line in lines:
         match = pattern.search(line)
         if match:
@@ -65,9 +50,6 @@ def parse_ticket(text, filename):
                 })
             except:
                 continue
-        else:
-            if show_debug and line.strip():
-                st.write(f"Geen match voor regel: '{line.strip()}'")
 
     return pd.DataFrame(data)
 
@@ -87,6 +69,15 @@ def extract_gewicht_kg(hoeveelheid):
         elif eenheid == "cl":
             return waarde / 100
     return 0
+
+def aantal_stuks_uit_hoeveelheid(hoeveelheid):
+    try:
+        # Verwijder alle letters en spaties, behoud alleen getallen, punt en komma
+        clean = re.sub(r"[^\d,\.]", "", hoeveelheid)
+        clean = clean.replace(",", ".")
+        return float(clean)
+    except:
+        return 1
 
 if uploaded_files:
     all_dataframes = []
@@ -110,11 +101,13 @@ if uploaded_files:
         final_df['Maand'] = final_df['Datum'].dt.to_period('M').astype(str)
 
         final_df['IsGewicht'] = final_df['Hoeveelheid'].apply(is_gewicht)
-        final_df['GewichtKg'] = final_df.apply(
-            lambda row: extract_gewicht_kg(row['Hoeveelheid']) if row['IsGewicht'] else 0,
+        final_df['GewichtKg'] = final_df.apply(lambda row: extract_gewicht_kg(row['Hoeveelheid']) if row['IsGewicht'] else 0, axis=1)
+        
+        # Correcte berekening totaal aantal stuks
+        final_df['AantalStuks'] = final_df.apply(
+            lambda row: 0 if row['IsGewicht'] else aantal_stuks_uit_hoeveelheid(row['Hoeveelheid']),
             axis=1
         )
-        final_df['AantalStuks'] = final_df['IsGewicht'].apply(lambda x: 0 if x else 1)
 
         st.success("✅ Gegevens uit alle tickets herkend! Bekijk of alles klopt.")
         st.dataframe(final_df.drop(columns=["TotaalNum", "IsGewicht"]))
@@ -144,9 +137,7 @@ if uploaded_files:
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             for ticket_name in final_df['Ticket'].unique():
-                ticket_df = final_df[final_df['Ticket'] == ticket_name].drop(
-                    columns=["TotaalNum", "GewichtKg", "AantalStuks", "IsGewicht"]
-                )
+                ticket_df = final_df[final_df['Ticket'] == ticket_name].drop(columns=["TotaalNum", "GewichtKg", "AantalStuks", "IsGewicht"])
                 sheet_name = ticket_name[:31]  # Excel sheet name limit
                 ticket_df.to_excel(writer, index=False, sheet_name=sheet_name)
 
