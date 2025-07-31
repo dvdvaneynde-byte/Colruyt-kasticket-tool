@@ -32,7 +32,8 @@ def parse_ticket(text, filename):
     for line in lines:
         match = pattern.search(line)
         if match:
-            benaming = match.group(1).strip()
+            benaming_raw = match.group(1).strip()
+            benaming = re.sub(r"^(?:[A-Z]\s*)?\d{3,6}\s+", "", benaming_raw).strip()
             hoeveelheid = match.group(2).strip()
             eenheidsprijs = match.group(3).replace(",", ".")
             totaal = match.group(4).replace(",", ".")
