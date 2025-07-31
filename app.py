@@ -54,16 +54,17 @@ def parse_ticket(text, filename):
     return pd.DataFrame(data)
 
 
-def extract_gewicht(hoeveelheid):
+def extract_gewicht_gesplitst(hoeveelheid):
     match = re.search(r"(\d+[.,]?\d*)\s*(g|kg|ml|l|cl)", hoeveelheid.lower())
     if match:
         waarde = float(match.group(1).replace(",", "."))
         eenheid = match.group(2)
-        if eenheid == "kg": waarde *= 1000
-        if eenheid == "l": waarde *= 1000
-        if eenheid == "cl": waarde *= 10
-        return waarde
-    return 0
+        if eenheid in ["kg", "l"]:
+            return {"kg_l": waarde, "g_ml": waarde * 1000}
+        elif eenheid in ["g", "ml", "cl"]:
+            if eenheid == "cl": waarde *= 10
+            return {"kg_l": waarde / 1000, "g_ml": waarde}
+    return {"kg_l": 0, "g_ml": 0}
 
 if uploaded_files:
     all_dataframes = []
@@ -86,33 +87,38 @@ if uploaded_files:
         final_df['Jaar'] = final_df['Datum'].dt.year
         final_df['Maand'] = final_df['Datum'].dt.to_period('M').astype(str)
 
-        # Gewicht in gram/ml voor optelling
-        final_df['GewichtGr'] = final_df['Hoeveelheid'].apply(extract_gewicht)
+        gewichten = final_df['Hoeveelheid'].apply(extract_gewicht_gesplitst)
+        final_df['GewichtKgL'] = gewichten.apply(lambda x: x['kg_l'])
+        final_df['GewichtGrMl'] = gewichten.apply(lambda x: x['g_ml'])
 
         st.success("✅ Gegevens uit alle tickets herkend! Bekijk of alles klopt.")
-        st.dataframe(final_df.drop(columns=["TotaalNum", "GewichtGr"]))
+        st.dataframe(final_df.drop(columns=["TotaalNum", "GewichtKgL", "GewichtGrMl"]))
 
         # Samenvatting per maand en jaar
         pivot_maand = final_df.groupby(['Maand', 'Benaming']).agg({
             'TotaalNum': 'sum',
-            'GewichtGr': 'sum'
+            'GewichtKgL': 'sum',
+            'GewichtGrMl': 'sum'
         }).reset_index()
         pivot_maand['Totaalprijs'] = pivot_maand['TotaalNum'].apply(lambda x: f"€{x:.2f}")
-        pivot_maand['Totaal gewicht (g/ml)'] = pivot_maand['GewichtGr'].apply(lambda x: f"{x:.0f}")
-        pivot_maand = pivot_maand[['Maand', 'Benaming', 'Totaal gewicht (g/ml)', 'Totaalprijs']]
+        pivot_maand['Totaal in kg/l'] = pivot_maand['GewichtKgL'].apply(lambda x: f"{x:.2f} kg/l")
+        pivot_maand['Totaal in g/ml'] = pivot_maand['GewichtGrMl'].apply(lambda x: f"{x:.0f} g/ml")
+        pivot_maand = pivot_maand[['Maand', 'Benaming', 'Totaalprijs', 'Totaal in kg/l', 'Totaal in g/ml']]
 
         pivot_jaar = final_df.groupby(['Jaar', 'Benaming']).agg({
             'TotaalNum': 'sum',
-            'GewichtGr': 'sum'
+            'GewichtKgL': 'sum',
+            'GewichtGrMl': 'sum'
         }).reset_index()
         pivot_jaar['Totaalprijs'] = pivot_jaar['TotaalNum'].apply(lambda x: f"€{x:.2f}")
-        pivot_jaar['Totaal gewicht (g/ml)'] = pivot_jaar['GewichtGr'].apply(lambda x: f"{x:.0f}")
-        pivot_jaar = pivot_jaar[['Jaar', 'Benaming', 'Totaal gewicht (g/ml)', 'Totaalprijs']]
+        pivot_jaar['Totaal in kg/l'] = pivot_jaar['GewichtKgL'].apply(lambda x: f"{x:.2f} kg/l")
+        pivot_jaar['Totaal in g/ml'] = pivot_jaar['GewichtGrMl'].apply(lambda x: f"{x:.0f} g/ml")
+        pivot_jaar = pivot_jaar[['Jaar', 'Benaming', 'Totaalprijs', 'Totaal in kg/l', 'Totaal in g/ml']]
 
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             for ticket_name in final_df['Ticket'].unique():
-                ticket_df = final_df[final_df['Ticket'] == ticket_name].drop(columns=["TotaalNum", "GewichtGr"])
+                ticket_df = final_df[final_df['Ticket'] == ticket_name].drop(columns=["TotaalNum", "GewichtKgL", "GewichtGrMl"])
                 sheet_name = ticket_name[:31]  # Excel sheet name limit
                 ticket_df.to_excel(writer, index=False, sheet_name=sheet_name)
 
