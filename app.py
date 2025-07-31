@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pdfplumber
 import pandas as pd
@@ -8,34 +9,28 @@ from datetime import datetime
 st.set_page_config(page_title="Colruyt Ticket naar Excel", layout="centered")
 st.title("🧾 Colruyt kasticket naar Excel")
 
-uploaded_files = st.file_uploader("Upload één of meerdere Colruyt-kastickets als PDF-bestand", type=["pdf"], accept_multiple_files=True)
+uploaded_files = st.file_uploader("Upload één of meerdere Colruyt-kastickets (PDF)", type=["pdf"], accept_multiple_files=True)
 
 def parse_ticket(text, filename):
     lines = text.split('\n')
     data = []
     aankoopdatum = ""
 
-    # Zoek aankoopdatum
     for line in lines:
-        match = re.search(r"(\d{2}[/-]\d{2}[/-]\d{4})", line)
+        match = re.search(r"(\d{2}/\d{2}/\d{4})", line)
         if match:
-            for fmt in ("%d/%m/%Y", "%d-%m-%Y"):
-                try:
-                    aankoopdatum = datetime.strptime(match.group(1), fmt).date()
-                    break
-                except:
-                    continue
-            if aankoopdatum:
+            try:
+                aankoopdatum = datetime.strptime(match.group(1), "%d/%m/%Y").date()
                 break
+            except:
+                continue
 
     pattern = re.compile(r"(.+?)\s+(\S+)\s+(\d+[.,]?\d*)\s+(\d+[.,]?\d*)$")
     for line in lines:
         match = pattern.search(line)
         if match:
             benaming_raw = match.group(1).strip()
-            # Verwijder artikelnummer-achtige prefix
             benaming = re.sub(r"^(?:[A-Z]\s*)?\d{3,6}\s+", "", benaming_raw).strip()
-
             hoeveelheid = match.group(2).strip()
             eenheidsprijs = match.group(3).replace(",", ".")
             totaal = match.group(4).replace(",", ".")
@@ -93,10 +88,7 @@ def aantal_stuks_uit_hoeveelheid(hoeveelheid):
 def auto_adjust_column_widths(writer, df, sheet_name):
     worksheet = writer.sheets[sheet_name]
     for i, col in enumerate(df.columns):
-        max_len = max(
-            df[col].astype(str).map(len).max(),
-            len(col)
-        ) + 2
+        max_len = max(df[col].astype(str).map(len).max(), len(col)) + 2
         worksheet.set_column(i, i, max_len)
 
 if uploaded_files:
@@ -122,7 +114,6 @@ if uploaded_files:
 
         final_df['IsGewicht'] = final_df['Hoeveelheid'].apply(is_gewicht)
         final_df['GewichtKg'] = final_df.apply(lambda row: extract_gewicht_kg(row['Hoeveelheid']) if row['IsGewicht'] else 0, axis=1)
-
         final_df['AantalStuks'] = final_df.apply(
             lambda row: 0 if row['IsGewicht'] else aantal_stuks_uit_hoeveelheid(row['Hoeveelheid']),
             axis=1
@@ -131,49 +122,47 @@ if uploaded_files:
         st.success("✅ Gegevens uit alle tickets herkend! Bekijk of alles klopt.")
         st.dataframe(final_df.drop(columns=["TotaalNum", "IsGewicht"]))
 
-        # Samenvatting per maand (prijs als laatste kolom)
+        # Samenvatting per maand gesorteerd
         pivot_maand = final_df.groupby(['Maand', 'Benaming']).agg({
             'TotaalNum': 'sum',
             'GewichtKg': 'sum',
             'AantalStuks': 'sum'
         }).reset_index()
+        pivot_maand = pivot_maand.sort_values(by='TotaalNum')
         pivot_maand['Totaal aantal (stuks)'] = pivot_maand['AantalStuks'].astype(int)
         pivot_maand['Totaal gewicht (kg)'] = pivot_maand['GewichtKg'].apply(lambda x: f"{x:.2f} kg")
         pivot_maand['Totaalprijs'] = pivot_maand['TotaalNum'].apply(lambda x: f"€{x:.2f}")
         pivot_maand = pivot_maand[['Maand', 'Benaming', 'Totaal aantal (stuks)', 'Totaal gewicht (kg)', 'Totaalprijs']]
 
-        # Samenvatting per jaar (prijs als laatste kolom)
+        # Samenvatting per jaar gesorteerd
         pivot_jaar = final_df.groupby(['Jaar', 'Benaming']).agg({
             'TotaalNum': 'sum',
             'GewichtKg': 'sum',
             'AantalStuks': 'sum'
         }).reset_index()
+        pivot_jaar = pivot_jaar.sort_values(by='TotaalNum')
         pivot_jaar['Totaal aantal (stuks)'] = pivot_jaar['AantalStuks'].astype(int)
         pivot_jaar['Totaal gewicht (kg)'] = pivot_jaar['GewichtKg'].apply(lambda x: f"{x:.2f} kg")
         pivot_jaar['Totaalprijs'] = pivot_jaar['TotaalNum'].apply(lambda x: f"€{x:.2f}")
         pivot_jaar = pivot_jaar[['Jaar', 'Benaming', 'Totaal aantal (stuks)', 'Totaal gewicht (kg)', 'Totaalprijs']]
 
-        # Totaalprijs per ticket (niet sorteren)
-        totaal_per_ticket = final_df.groupby('Ticket')['TotaalNum'].sum().reset_index()
-        totaal_per_ticket['Totaalprijs'] = totaal_per_ticket['TotaalNum'].apply(lambda x: f"€{x:.2f}")
-        st.subheader("💰 Totaalprijs per ticket")
-        st.dataframe(totaal_per_ticket[['Ticket', 'Totaalprijs']])
-
-        # Totaalprijs per maand (sorteren op prijs)
-        totaal_per_maand = final_df.groupby('Maand')['TotaalNum'].sum().reset_index()
-        totaal_per_maand = totaal_per_maand.sort_values(by='TotaalNum')
-        totaal_per_maand['Totaalprijs'] = totaal_per_maand['TotaalNum'].apply(lambda x: f"€{x:.2f}")
-        st.subheader("📅 Totaalprijs per maand")
-        st.dataframe(totaal_per_maand[['Maand', 'Totaalprijs']])
-
-        # Totaalprijs per jaar (sorteren op prijs)
-        totaal_per_jaar = final_df.groupby('Jaar')['TotaalNum'].sum().reset_index()
-        totaal_per_jaar = totaal_per_jaar.sort_values(by='TotaalNum')
-        totaal_per_jaar['Totaalprijs'] = totaal_per_jaar['TotaalNum'].apply(lambda x: f"€{x:.2f}")
-        st.subheader("📆 Totaalprijs per jaar")
-        st.dataframe(totaal_per_jaar[['Jaar', 'Totaalprijs']])
-
-        # Excel export
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             for ticket_name in final_df['Ticket'].unique():
+                ticket_df = final_df[final_df['Ticket'] == ticket_name].drop(columns=["TotaalNum", "GewichtKg", "AantalStuks", "IsGewicht"])
+                sheet_name = ticket_name[:31]
+                ticket_df.to_excel(writer, index=False, sheet_name=sheet_name)
+                auto_adjust_column_widths(writer, ticket_df, sheet_name)
+
+            for df, sheet_name in [(pivot_maand, "Totaal per maand"), (pivot_jaar, "Totaal per jaar")]:
+                df.to_excel(writer, index=False, sheet_name=sheet_name)
+                auto_adjust_column_widths(writer, df, sheet_name)
+
+        st.download_button(
+            label="💾 Download Excel-bestand",
+            data=output.getvalue(),
+            file_name="colruyt_aankopen.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    else:
+        st.warning("⚠️ Geen producten gevonden in de geüploade tickets.")
