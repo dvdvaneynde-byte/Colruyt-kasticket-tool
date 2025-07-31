@@ -8,16 +8,21 @@ from datetime import datetime
 st.set_page_config(page_title="Colruyt Ticket naar Excel", layout="centered")
 st.title("🧾 Colruyt kasticket naar Excel")
 
-uploaded_files = st.file_uploader("Upload één of meerdere Colruyt-kastickets (PDF)", type=["pdf"], accept_multiple_files=True)
-
+# Maak uploader groter en duidelijker
+uploaded_files = st.file_uploader(
+    "**Upload één of meerdere Colruyt-kastickets (PDF)**",
+    type=["pdf"], accept_multiple_files=True,
+    help="Selecteer één of meerdere PDF-bestanden van je Colruyt-kasticket"
+)
 
 def parse_ticket(text, filename):
     lines = text.split('\n')
     data = []
-    aankoopdatum = ""
+    aankoopdatum = None
 
-    # Zoek aankoopdatum
-    for line in lines:
+    # Verbeterde datumextractie:
+    # Zoek de eerste datum in het formaat dd/mm/yyyy, maar alleen bovenaan het ticket (eerste 20 regels)
+    for line in lines[:20]:
         match = re.search(r"(\d{2}/\d{2}/\d{4})", line)
         if match:
             try:
@@ -26,10 +31,30 @@ def parse_ticket(text, filename):
             except:
                 continue
 
-    # Zoek producten met exacte benaming en hoeveelheid uit ticket
-    pattern = re.compile(r"(.+?)\s+(\S+)\s+(\d+[.,]?\d*)\s+(\d+[.,]?\d*)$")
+    # Als nog geen datum, zoek in hele tekst (fallback)
+    if aankoopdatum is None:
+        for line in lines:
+            match = re.search(r"(\d{2}/\d{2}/\d{4})", line)
+            if match:
+                try:
+                    aankoopdatum = datetime.strptime(match.group(1), "%d/%m/%Y").date()
+                    break
+                except:
+                    continue
+
+    # Betere regex voor productregels:
+    # Colruyt tickets hebben vaak een patroon:
+    # productnaam [spaties] hoeveelheid [spaties] prijs per eenheid [spaties] totaalprijs
+    # Hoeveelheid kan iets zijn als '1', '2', '0.5 kg', '500 g', '3 st'
+    # Regex: productnaam (alles tot vóór de hoeveelheid), hoeveelheid, eenheidsprijs, totaalprijs
+
+    pattern = re.compile(
+        r"^(.*?)\s{2,}(\d+[.,]?\d*\s*(?:kg|g|l|ml|cl|st)?)\s+(\d+[.,]?\d*)\s+(\d+[.,]?\d*)$",
+        re.IGNORECASE
+    )
+
     for line in lines:
-        match = pattern.search(line)
+        match = pattern.search(line.strip())
         if match:
             benaming = match.group(1).strip()
             hoeveelheid = match.group(2).strip()
@@ -57,18 +82,28 @@ def parse_ticket(text, filename):
 def is_gewicht(hoeveelheid):
     return bool(re.search(r"\d+[.,]?\d*\s*(g|kg|ml|l|cl)", hoeveelheid.lower()))
 
+
 def extract_gewicht_kg(hoeveelheid):
     match = re.search(r"(\d+[.,]?\d*)\s*(g|kg|ml|l|cl)", hoeveelheid.lower())
     if match:
         waarde = float(match.group(1).replace(",", "."))
         eenheid = match.group(2)
-        if eenheid == "kg" or eenheid == "l":
+        if eenheid in ["kg", "l"]:
             return waarde
-        elif eenheid == "g" or eenheid == "ml":
+        elif eenheid in ["g", "ml"]:
             return waarde / 1000
         elif eenheid == "cl":
             return waarde / 100
-    return 0
+    return None
+
+
+def extract_aantal_stuks(hoeveelheid):
+    # Haal aantal stuks eruit als alleen een getal staat of getal + 'st'
+    match = re.match(r"^(\d+)(?:\s*st)?$", hoeveelheid.strip().lower())
+    if match:
+        return int(match.group(1))
+    return 1  # standaard 1 als geen expliciet getal
+
 
 if uploaded_files:
     all_dataframes = []
@@ -92,8 +127,8 @@ if uploaded_files:
         final_df['Maand'] = final_df['Datum'].dt.to_period('M').astype(str)
 
         final_df['IsGewicht'] = final_df['Hoeveelheid'].apply(is_gewicht)
-        final_df['GewichtKg'] = final_df.apply(lambda row: extract_gewicht_kg(row['Hoeveelheid']) if row['IsGewicht'] else 0, axis=1)
-        final_df['AantalStuks'] = final_df['IsGewicht'].apply(lambda x: 0 if x else 1)
+        final_df['GewichtKg'] = final_df.apply(lambda row: extract_gewicht_kg(row['Hoeveelheid']) if row['IsGewicht'] else None, axis=1)
+        final_df['AantalStuks'] = final_df.apply(lambda row: extract_aantal_stuks(row['Hoeveelheid']) if not row['IsGewicht'] else 0, axis=1)
 
         st.success("✅ Gegevens uit alle tickets herkend! Bekijk of alles klopt.")
         st.dataframe(final_df.drop(columns=["TotaalNum", "IsGewicht"]))
@@ -106,7 +141,7 @@ if uploaded_files:
         }).reset_index()
         pivot_maand['Totaalprijs'] = pivot_maand['TotaalNum'].apply(lambda x: f"€{x:.2f}")
         pivot_maand['Totaal aantal (stuks)'] = pivot_maand['AantalStuks'].astype(int)
-        pivot_maand['Totaal gewicht (kg)'] = pivot_maand['GewichtKg'].apply(lambda x: f"{x:.2f} kg")
+        pivot_maand['Totaal gewicht (kg)'] = pivot_maand['GewichtKg'].fillna(0).apply(lambda x: f"{x:.2f} kg")
         pivot_maand = pivot_maand[['Maand', 'Benaming', 'Totaalprijs', 'Totaal aantal (stuks)', 'Totaal gewicht (kg)']]
 
         # Samenvatting per jaar
@@ -117,13 +152,14 @@ if uploaded_files:
         }).reset_index()
         pivot_jaar['Totaalprijs'] = pivot_jaar['TotaalNum'].apply(lambda x: f"€{x:.2f}")
         pivot_jaar['Totaal aantal (stuks)'] = pivot_jaar['AantalStuks'].astype(int)
-        pivot_jaar['Totaal gewicht (kg)'] = pivot_jaar['GewichtKg'].apply(lambda x: f"{x:.2f} kg")
+        pivot_jaar['Totaal gewicht (kg)'] = pivot_jaar['GewichtKg'].fillna(0).apply(lambda x: f"{x:.2f} kg")
         pivot_jaar = pivot_jaar[['Jaar', 'Benaming', 'Totaalprijs', 'Totaal aantal (stuks)', 'Totaal gewicht (kg)']]
 
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             for ticket_name in final_df['Ticket'].unique():
-                ticket_df = final_df[final_df['Ticket'] == ticket_name].drop(columns=["TotaalNum", "GewichtKg", "AantalStuks", "IsGewicht"])
+                ticket_df = final_df[final_df['Ticket'] == ticket_name].drop(
+                    columns=["TotaalNum", "GewichtKg", "AantalStuks", "IsGewicht"])
                 sheet_name = ticket_name[:31]  # Excel sheet name limit
                 ticket_df.to_excel(writer, index=False, sheet_name=sheet_name)
 
@@ -138,3 +174,5 @@ if uploaded_files:
         )
     else:
         st.warning("⚠️ Geen producten gevonden in de geüploade tickets.")
+else:
+    st.info("📄 Upload hier je Colruyt PDF-kastickets om te starten.")
