@@ -33,7 +33,9 @@ def parse_ticket(text, filename):
         match = pattern.search(line)
         if match:
             benaming_raw = match.group(1).strip()
+            # Verwijder artikelnummer-achtige prefix
             benaming = re.sub(r"^(?:[A-Z]\s*)?\d{3,6}\s+", "", benaming_raw).strip()
+
             hoeveelheid = match.group(2).strip()
             eenheidsprijs = match.group(3).replace(",", ".")
             totaal = match.group(4).replace(",", ".")
@@ -151,49 +153,27 @@ if uploaded_files:
         pivot_jaar['Totaalprijs'] = pivot_jaar['TotaalNum'].apply(lambda x: f"€{x:.2f}")
         pivot_jaar = pivot_jaar[['Jaar', 'Benaming', 'Totaal aantal (stuks)', 'Totaal gewicht (kg)', 'Totaalprijs']]
 
-        # Totaalprijs per ticket
+        # Totaalprijs per ticket (niet sorteren)
         totaal_per_ticket = final_df.groupby('Ticket')['TotaalNum'].sum().reset_index()
         totaal_per_ticket['Totaalprijs'] = totaal_per_ticket['TotaalNum'].apply(lambda x: f"€{x:.2f}")
         st.subheader("💰 Totaalprijs per ticket")
         st.dataframe(totaal_per_ticket[['Ticket', 'Totaalprijs']])
 
-        # Totaalprijs per maand
+        # Totaalprijs per maand (sorteren op prijs)
         totaal_per_maand = final_df.groupby('Maand')['TotaalNum'].sum().reset_index()
+        totaal_per_maand = totaal_per_maand.sort_values(by='TotaalNum')
         totaal_per_maand['Totaalprijs'] = totaal_per_maand['TotaalNum'].apply(lambda x: f"€{x:.2f}")
-        st.subheader("💰 Totaalprijs per maand")
+        st.subheader("📅 Totaalprijs per maand")
         st.dataframe(totaal_per_maand[['Maand', 'Totaalprijs']])
 
-        # Totaalprijs per jaar
+        # Totaalprijs per jaar (sorteren op prijs)
         totaal_per_jaar = final_df.groupby('Jaar')['TotaalNum'].sum().reset_index()
+        totaal_per_jaar = totaal_per_jaar.sort_values(by='TotaalNum')
         totaal_per_jaar['Totaalprijs'] = totaal_per_jaar['TotaalNum'].apply(lambda x: f"€{x:.2f}")
-        st.subheader("💰 Totaalprijs per jaar")
+        st.subheader("📆 Totaalprijs per jaar")
         st.dataframe(totaal_per_jaar[['Jaar', 'Totaalprijs']])
 
+        # Excel export
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             for ticket_name in final_df['Ticket'].unique():
-                ticket_df = final_df[final_df['Ticket'] == ticket_name].drop(columns=["TotaalNum", "GewichtKg", "AantalStuks", "IsGewicht"])
-                sheet_name = ticket_name[:31]  # Excel sheet name limit
-                ticket_df.to_excel(writer, index=False, sheet_name=sheet_name)
-                auto_adjust_column_widths(writer, ticket_df, sheet_name)
-
-            # Schrijven en auto kolombreedte voor samenvattingen
-            for df, sheet_name in [(pivot_maand, "Totaal per maand"), (pivot_jaar, "Totaal per jaar")]:
-                df.to_excel(writer, index=False, sheet_name=sheet_name)
-                auto_adjust_column_widths(writer, df, sheet_name)
-
-            # Schrijven totaalprijzen
-            for df, sheet_name in [(totaal_per_ticket, "Totaal per ticket"),
-                                   (totaal_per_maand, "Totaalprijs per maand"),
-                                   (totaal_per_jaar, "Totaalprijs per jaar")]:
-                df.to_excel(writer, index=False, sheet_name=sheet_name)
-                auto_adjust_column_widths(writer, df, sheet_name)
-
-        st.download_button(
-            label="💾 Download Excel-bestand",
-            data=output.getvalue(),
-            file_name="colruyt_aankopen.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-    else:
-        st.warning("⚠️ Geen producten gevonden in de geüploade tickets.")
