@@ -26,7 +26,6 @@ def parse_ticket(text, filename):
             except:
                 continue
 
-    # Zoek producten met exacte benaming en hoeveelheid uit ticket
     pattern = re.compile(r"(.+?)\s+(\S+)\s+(\d+[.,]?\d*)\s+(\d+[.,]?\d*)$")
     for line in lines:
         match = pattern.search(line)
@@ -35,6 +34,17 @@ def parse_ticket(text, filename):
             hoeveelheid = match.group(2).strip()
             eenheidsprijs = match.group(3).replace(",", ".")
             totaal = match.group(4).replace(",", ".")
+
+            # Filter ongewenste regels
+            if len(benaming) < 3:
+                continue
+            uitsluit_woorden = ["colruyt", "retail", "prijs gezien", "bel ons", "toch ergens"]
+            if any(w in benaming.lower() for w in uitsluit_woorden):
+                continue
+            # Als hoeveelheid geen getal of een duidelijke hoeveelheid is (zoals '02'), kan je ook filteren:
+            if not re.match(r"^\d+([.,]\d+)?\s*(g|kg|ml|l|cl)?$", hoeveelheid.lower()):
+                continue
+
             try:
                 eenheidsprijs_f = f"€{float(eenheidsprijs):.2f}"
                 totaal_f_val = float(totaal)
@@ -52,7 +62,6 @@ def parse_ticket(text, filename):
                 continue
 
     return pd.DataFrame(data)
-
 
 def is_gewicht(hoeveelheid):
     return bool(re.search(r"\d+[.,]?\d*\s*(g|kg|ml|l|cl)", hoeveelheid.lower()))
