@@ -11,7 +11,7 @@ st.title("🧾 Colruyt kasticket naar Excel")
 uploaded_files = st.file_uploader("Upload één of meerdere Colruyt-kastickets (PDF)", type=["pdf"], accept_multiple_files=True)
 
 
-def parse_ticket(text):
+def parse_ticket(text, filename):
     lines = text.split('\n')
     data = []
     aankoopdatum = ""
@@ -40,6 +40,7 @@ def parse_ticket(text):
                 totaal_f_val = float(totaal)
                 totaal_f = f"€{totaal_f_val:.2f}"
                 data.append({
+                    "Ticket": filename,
                     "Datum": aankoopdatum,
                     "Benaming": benaming,
                     "Hoeveelheid": hoeveelheid,
@@ -53,6 +54,17 @@ def parse_ticket(text):
     return pd.DataFrame(data)
 
 
+def extract_gewicht(hoeveelheid):
+    match = re.search(r"(\d+[.,]?\d*)\s*(g|kg|ml|l|cl)", hoeveelheid.lower())
+    if match:
+        waarde = float(match.group(1).replace(",", "."))
+        eenheid = match.group(2)
+        if eenheid == "kg": waarde *= 1000
+        if eenheid == "l": waarde *= 1000
+        if eenheid == "cl": waarde *= 10
+        return waarde
+    return 0
+
 if uploaded_files:
     all_dataframes = []
 
@@ -64,7 +76,7 @@ if uploaded_files:
                 if text:
                     all_text += text + "\n"
 
-        df = parse_ticket(all_text)
+        df = parse_ticket(all_text, uploaded_file.name)
         if not df.empty:
             all_dataframes.append(df)
 
@@ -74,23 +86,36 @@ if uploaded_files:
         final_df['Jaar'] = final_df['Datum'].dt.year
         final_df['Maand'] = final_df['Datum'].dt.to_period('M').astype(str)
 
+        # Gewicht in gram/ml voor optelling
+        final_df['GewichtGr'] = final_df['Hoeveelheid'].apply(extract_gewicht)
+
         st.success("✅ Gegevens uit alle tickets herkend! Bekijk of alles klopt.")
-        st.dataframe(final_df.drop(columns=["TotaalNum"]))
+        st.dataframe(final_df.drop(columns=["TotaalNum", "GewichtGr"]))
 
-        # Tellingen per maand en jaar o.b.v. Hoeveelheid als tekstwaarde
-        pivot_maand = final_df.groupby(['Maand', 'Benaming', 'Hoeveelheid']).size().reset_index(name='Aantal lijnen')
-        pivot_maand_totalen = final_df.groupby(['Maand', 'Benaming'])['TotaalNum'].sum().reset_index()
-        pivot_maand_totalen['Totaalprijs'] = pivot_maand_totalen['TotaalNum'].apply(lambda x: f"€{x:.2f}")
-        pivot_maand = pd.merge(pivot_maand, pivot_maand_totalen.drop(columns='TotaalNum'), on=['Maand', 'Benaming'])
+        # Samenvatting per maand en jaar
+        pivot_maand = final_df.groupby(['Maand', 'Benaming']).agg({
+            'TotaalNum': 'sum',
+            'GewichtGr': 'sum'
+        }).reset_index()
+        pivot_maand['Totaalprijs'] = pivot_maand['TotaalNum'].apply(lambda x: f"€{x:.2f}")
+        pivot_maand['Totaal gewicht (g/ml)'] = pivot_maand['GewichtGr'].apply(lambda x: f"{x:.0f}")
+        pivot_maand = pivot_maand[['Maand', 'Benaming', 'Totaal gewicht (g/ml)', 'Totaalprijs']]
 
-        pivot_jaar = final_df.groupby(['Jaar', 'Benaming', 'Hoeveelheid']).size().reset_index(name='Aantal lijnen')
-        pivot_jaar_totalen = final_df.groupby(['Jaar', 'Benaming'])['TotaalNum'].sum().reset_index()
-        pivot_jaar_totalen['Totaalprijs'] = pivot_jaar_totalen['TotaalNum'].apply(lambda x: f"€{x:.2f}")
-        pivot_jaar = pd.merge(pivot_jaar, pivot_jaar_totalen.drop(columns='TotaalNum'), on=['Jaar', 'Benaming'])
+        pivot_jaar = final_df.groupby(['Jaar', 'Benaming']).agg({
+            'TotaalNum': 'sum',
+            'GewichtGr': 'sum'
+        }).reset_index()
+        pivot_jaar['Totaalprijs'] = pivot_jaar['TotaalNum'].apply(lambda x: f"€{x:.2f}")
+        pivot_jaar['Totaal gewicht (g/ml)'] = pivot_jaar['GewichtGr'].apply(lambda x: f"{x:.0f}")
+        pivot_jaar = pivot_jaar[['Jaar', 'Benaming', 'Totaal gewicht (g/ml)', 'Totaalprijs']]
 
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            final_df.drop(columns=["TotaalNum"]).to_excel(writer, index=False, sheet_name="Aankopen")
+            for ticket_name in final_df['Ticket'].unique():
+                ticket_df = final_df[final_df['Ticket'] == ticket_name].drop(columns=["TotaalNum", "GewichtGr"])
+                sheet_name = ticket_name[:31]  # Excel sheet name limit
+                ticket_df.to_excel(writer, index=False, sheet_name=sheet_name)
+
             pivot_maand.to_excel(writer, index=False, sheet_name="Totaal per maand")
             pivot_jaar.to_excel(writer, index=False, sheet_name="Totaal per jaar")
 
