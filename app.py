@@ -72,7 +72,6 @@ def extract_gewicht_kg(hoeveelheid):
 
 def aantal_stuks_uit_hoeveelheid(hoeveelheid):
     try:
-        # Verwijder alle letters en spaties, behoud alleen getallen, punt en komma
         clean = re.sub(r"[^\d,\.]", "", hoeveelheid)
         clean = clean.replace(",", ".")
         return float(clean)
@@ -103,7 +102,6 @@ if uploaded_files:
         final_df['IsGewicht'] = final_df['Hoeveelheid'].apply(is_gewicht)
         final_df['GewichtKg'] = final_df.apply(lambda row: extract_gewicht_kg(row['Hoeveelheid']) if row['IsGewicht'] else 0, axis=1)
         
-        # Correcte berekening totaal aantal stuks
         final_df['AantalStuks'] = final_df.apply(
             lambda row: 0 if row['IsGewicht'] else aantal_stuks_uit_hoeveelheid(row['Hoeveelheid']),
             axis=1
@@ -112,27 +110,27 @@ if uploaded_files:
         st.success("✅ Gegevens uit alle tickets herkend! Bekijk of alles klopt.")
         st.dataframe(final_df.drop(columns=["TotaalNum", "IsGewicht"]))
 
-        # Samenvatting per maand
+        # Samenvatting per maand (prijs als laatste kolom)
         pivot_maand = final_df.groupby(['Maand', 'Benaming']).agg({
             'TotaalNum': 'sum',
             'GewichtKg': 'sum',
             'AantalStuks': 'sum'
         }).reset_index()
-        pivot_maand['Totaalprijs'] = pivot_maand['TotaalNum'].apply(lambda x: f"€{x:.2f}")
         pivot_maand['Totaal aantal (stuks)'] = pivot_maand['AantalStuks'].astype(int)
         pivot_maand['Totaal gewicht (kg)'] = pivot_maand['GewichtKg'].apply(lambda x: f"{x:.2f} kg")
-        pivot_maand = pivot_maand[['Maand', 'Benaming', 'Totaalprijs', 'Totaal aantal (stuks)', 'Totaal gewicht (kg)']]
+        pivot_maand['Totaalprijs'] = pivot_maand['TotaalNum'].apply(lambda x: f"€{x:.2f}")
+        pivot_maand = pivot_maand[['Maand', 'Benaming', 'Totaal aantal (stuks)', 'Totaal gewicht (kg)', 'Totaalprijs']]
 
-        # Samenvatting per jaar
+        # Samenvatting per jaar (prijs als laatste kolom)
         pivot_jaar = final_df.groupby(['Jaar', 'Benaming']).agg({
             'TotaalNum': 'sum',
             'GewichtKg': 'sum',
             'AantalStuks': 'sum'
         }).reset_index()
-        pivot_jaar['Totaalprijs'] = pivot_jaar['TotaalNum'].apply(lambda x: f"€{x:.2f}")
         pivot_jaar['Totaal aantal (stuks)'] = pivot_jaar['AantalStuks'].astype(int)
         pivot_jaar['Totaal gewicht (kg)'] = pivot_jaar['GewichtKg'].apply(lambda x: f"{x:.2f} kg")
-        pivot_jaar = pivot_jaar[['Jaar', 'Benaming', 'Totaalprijs', 'Totaal aantal (stuks)', 'Totaal gewicht (kg)']]
+        pivot_jaar['Totaalprijs'] = pivot_jaar['TotaalNum'].apply(lambda x: f"€{x:.2f}")
+        pivot_jaar = pivot_jaar[['Jaar', 'Benaming', 'Totaal aantal (stuks)', 'Totaal gewicht (kg)', 'Totaalprijs']]
 
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -141,8 +139,25 @@ if uploaded_files:
                 sheet_name = ticket_name[:31]  # Excel sheet name limit
                 ticket_df.to_excel(writer, index=False, sheet_name=sheet_name)
 
-            pivot_maand.to_excel(writer, index=False, sheet_name="Totaal per maand")
-            pivot_jaar.to_excel(writer, index=False, sheet_name="Totaal per jaar")
+                # Kolombreedte auto aanpassen
+                worksheet = writer.sheets[sheet_name]
+                for i, col in enumerate(ticket_df.columns):
+                    max_len = max(
+                        ticket_df[col].astype(str).map(len).max(),
+                        len(col)
+                    ) + 2
+                    worksheet.set_column(i, i, max_len)
+
+            # Schrijven en auto kolombreedte voor samenvattingen
+            for df, sheet_name in [(pivot_maand, "Totaal per maand"), (pivot_jaar, "Totaal per jaar")]:
+                df.to_excel(writer, index=False, sheet_name=sheet_name)
+                worksheet = writer.sheets[sheet_name]
+                for i, col in enumerate(df.columns):
+                    max_len = max(
+                        df[col].astype(str).map(len).max(),
+                        len(col)
+                    ) + 2
+                    worksheet.set_column(i, i, max_len)
 
         st.download_button(
             label="💾 Download Excel-bestand",
